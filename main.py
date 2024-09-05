@@ -13,7 +13,7 @@ from scipy.stats import randint
 # ======================#
 
 np.random.seed(781995)
-size = 1_000
+size = 10_000
 df = pd.DataFrame(
     {
         # Create a binary target varaible:
@@ -90,11 +90,19 @@ ctgan = CTGAN(verbose=True)
 ctgan.fit(train_df, categorical_features, epochs=500)
 
 # generate synthetic data
-synthetic_samples = ctgan.sample(500)
-synthetic_samples.head(10)
+synthetic_samples = ctgan.sample(2_000)
+synthetic_samples.head(5)
+
+# merge synthetic_samples and
+train_df_augmented = pd.concat(
+    [train_df.reset_index(drop=True), synthetic_samples.reset_index(drop=True)], axis=0
+)
+
+X_train_augmented = train_df_augmented.drop(columns="target")
+y_train_augmented = train_df_augmented["target"]
 
 # ======================#
-# ......Comparing the two data sets........#
+# .......Comparing the two data sets......#
 # ======================#
 
 print(train_df.shape, synthetic_samples.shape)
@@ -116,22 +124,34 @@ param_grid = {
 randomized_search = RandomizedSearchCV(
     estimator=RandomForestClassifier(random_state=781995),
     param_distributions=param_grid,
-    n_iter=10,
-    cv=2,
+    n_iter=200,
+    cv=3,
     verbose=2,
     n_jobs=-1,
     random_state=781995,
 )
 
 # Training and hyperparameter tuning.
-model_real = RandomForestClassifier(random_state=781995)
-model_real.fit(X_train, y_train)
+rf_model_real = RandomForestClassifier(random_state=781995)
+rf_model_real.fit(X_train, y_train)
+
+rf_model_augmented = RandomForestClassifier(random_state=781995)
+rf_model_augmented.fit(X_train_augmented, y_train_augmented)
 
 # Fit the randomsearch model and identify best hyperparameters.
 randomized_search.fit(X_train, y_train)
 best_model = randomized_search.best_estimator_
 best_params = randomized_search.best_params_
-print("Best Parameters Found:", str(best_params))
+print("Best Parameters Found using real training data:", str(best_params))
+
+randomized_search_augmented = randomized_search.fit(
+    X_train_augmented, y_train_augmented
+)
+best_model_augmented = randomized_search_augmented.best_estimator_
+best_params_augmented = randomized_search_augmented.best_params_
+print(
+    "Best Parameters Found using augmented training data:", str(best_params_augmented)
+)
 
 # ======================#
 # .........Random Forest Prediction........#
@@ -141,10 +161,22 @@ print("Best Parameters Found:", str(best_params))
 best_model = randomized_search.best_estimator_
 y_pred = best_model.predict(X_test)
 
+best_model_augmented = randomized_search_augmented.best_estimator_
+y_pred_augmented = best_model_augmented.predict(X_test)
+
 # accuracy and AUC-ROC
 accuracy = accuracy_score(y_test, y_pred)
 y_pred_prob = best_model.predict_proba(X_test)[:, 1]
 roc_auc = roc_auc_score(y_test.map({"Yes": 1, "No": 0}), y_pred_prob)
 
-print("\nAccuracy: " + str(accuracy))
-print("AUC-ROC: {:.2f}".format(roc_auc))
+print("\nAccuracy using real data: " + str(accuracy))
+print("AUC-ROC using real data: {:.2f}".format(roc_auc))
+
+accuracy_augmented = accuracy_score(y_test, y_pred_augmented)
+y_pred_prob_augmented = best_model.predict_proba(X_test)[:, 1]
+roc_auc_augmented = roc_auc_score(
+    y_test.map({"Yes": 1, "No": 0}), y_pred_prob_augmented
+)
+
+print("\nAccuracy using augmented data: " + str(accuracy_augmented))
+print("AUC-ROC using augmented data: {:.2f}".format(roc_auc_augmented))
